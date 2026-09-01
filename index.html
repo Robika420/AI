@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-LLM Portal</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; max-width: 800px; margin: 40px auto; padding: 20px; }
+        .controls { background: #1e293b; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
+        select, button { padding: 10px; border-radius: 6px; background: #334155; color: white; border: none; cursor: pointer; }
+        select { flex-grow: 1; }
+        button { background: #3b82f6; font-weight: bold; }
+        button:hover { background: #2563eb; }
+        #chat-box { background: #1e293b; border-radius: 8px; height: 450px; overflow-y: auto; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 12px; }
+        .message { padding: 10px 14px; border-radius: 6px; max-width: 80%; line-height: 1.4; word-break: break-word; }
+        .user { background: #3b82f6; align-self: flex-end; }
+        .assistant { background: #334155; align-self: flex-start; }
+        .input-area { display: flex; gap: 10px; }
+        textarea { flex-grow: 1; padding: 12px; border-radius: 8px; background: #1e293b; color: white; border: 1px solid #334155; resize: none; height: 50px; }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <label for="modelSelect">Model:</label>
+        <select id="modelSelect">
+            <option value="google:gemini-2.5-flash">Google: Gemini Flash</option>
+            <option value="openai:gpt-4o-mini">OpenAI: GPT-4o Mini</option>
+        </select>
+        <button onclick="clearChat()">Clear Chat</button>
+    </div>
+
+    <div id="chat-box"></div>
+
+    <div class="input-area">
+        <textarea id="userInput" placeholder="Type your message... (Shift+Enter for new line)" onkeydown="checkSend(event)"></textarea>
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
+<script>
+    // Stores chat history for the active session
+    let chatHistory = [];
+
+    function appendMessage(role, text) {
+        const box = document.getElementById('chat-box');
+        const div = document.createElement('div');
+        div.className = `message ${role === 'user' ? 'user' : 'assistant'}`;
+        div.innerText = text;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function clearChat() {
+        chatHistory = [];
+        document.getElementById('chat-box').innerHTML = '';
+    }
+
+    function checkSend(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('userInput');
+        const prompt = input.value.trim();
+        if (!prompt) return;
+
+        const [provider, model] = document.getElementById('modelSelect').value.split(':');
+        
+        appendMessage('user', prompt);
+        input.value = '';
+
+        // Push to local session history
+        chatHistory.push({ role: 'user', content: prompt });
+
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, model, history: chatHistory })
+            });
+
+            const data = await res.json();
+            if (data.text) {
+                appendMessage('assistant', data.text);
+                chatHistory.push({ role: 'assistant', content: data.text });
+            } else {
+                appendMessage('assistant', `Error: ${data.error || 'Unknown error'}`);
+            }
+        } catch (err) {
+            appendMessage('assistant', 'Network error connecting to backend.');
+        }
+    }
+</script>
+
+<script>
+    // Generate or retrieve a persistent session ID in the browser
+    let sessionId = localStorage.getItem('chat_session_id');
+    if (!sessionId) {
+        sessionId = 'session_' + Math.random().toString(36.substring(2, 15));
+        localStorage.setItem('chat_session_id', sessionId);
+    }
+
+    let chatHistory = [];
+
+    // Load past chat history on startup
+    window.onload = async function() {
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'load', sessionId })
+            });
+            const data = await res.json();
+            if (data.history) {
+                chatHistory = data.history;
+                chatHistory.forEach(msg => appendMessage(msg.role, msg.content));
+            }
+        } catch (e) {
+            console.error("Could not load history");
+        }
+    };
+
+    function appendMessage(role, text) {
+        const box = document.getElementById('chat-box');
+        const div = document.createElement('div');
+        div.className = `message ${role === 'user' ? 'user' : 'assistant'}`;
+        div.innerText = text;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('userInput');
+        const prompt = input.value.trim();
+        if (!prompt) return;
+
+        const [provider, model] = document.getElementById('modelSelect').value.split(':');
+        
+        appendMessage('user', prompt);
+        input.value = '';
+
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId, provider, model, history: chatHistory, prompt })
+            });
+
+            const data = await res.json();
+            if (data.text) {
+                appendMessage('assistant', data.text);
+                // Update local memory history tracker
+                chatHistory.push({ role: 'user', content: prompt });
+                chatHistory.push({ role: 'assistant', content: data.text });
+            } else {
+                appendMessage('assistant', `Error: ${data.error || 'Unknown error'}`);
+            }
+        } catch (err) {
+            appendMessage('assistant', 'Network error connecting to backend.');
+        }
+    }
+</script>
+
+</body>
+</html>
